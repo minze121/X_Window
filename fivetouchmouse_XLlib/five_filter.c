@@ -27,13 +27,15 @@
 
 int xi_opcode;
 int isMoveCursor = 0; //if accept multitouch event , don't move
-int windowLive = 0;
+int clickWindowLiveFlag = 0;
+int moveWindowLiveFlag = 0;
 
-Display * display_thread = NULL;
+Display * click_display = NULL;
+Display * move_display = NULL;
+
 Window activeWin = 0;
 Window focus_window;
 Window pre_window;
-XEvent backup_event;
 
 static xcb_connection_t *xcb_dpy;
 static xcb_screen_t * xcb_screen;
@@ -55,11 +57,12 @@ int isExistWindow(Window win)
 	return 1;
 }
 
-void * create_grabpointer(void * arg)
+/* ################## CLICK ################## */
+void * create_click_thread(void * arg)
 {
-	windowLive = 1;
+	clickWindowLiveFlag = 1;
 
-	display_thread = XOpenDisplay(NULL);
+	click_display = XOpenDisplay(NULL);
 	char * end;
 	Window win = strtoul((char *)arg,&end,0);
 
@@ -67,7 +70,7 @@ void * create_grabpointer(void * arg)
 	if (!isExistWindow(win))
 		goto OVER;
 
-	int ret = XGrabPointer(display_thread,win,False,
+	int ret = XGrabPointer(click_display,win,False,
 			 ButtonPressMask|ButtonReleaseMask|PointerMotionMask|FocusChangeMask|EnterWindowMask|LeaveWindowMask,
 			 GrabModeAsync,GrabModeAsync,
 			 win,
@@ -86,46 +89,124 @@ void * create_grabpointer(void * arg)
 	printf("grab begin\n");
 #endif
 
-	while(windowLive)
+	unsigned long mask = 0l;
+
+	while(clickWindowLiveFlag)
 	{
-		XNextEvent(display_thread,&event);
+		XNextEvent(click_display,&event);
 
-		unsigned long mask = 0l;
-		backup_event = event;
-
-		XSendEvent(display_thread,win,False,mask,&event);
+		XSendEvent(click_display,win,False,mask,&event);
 
 		switch(event.type)
 		{
 		case ButtonRelease:
 		{
-			windowLive = 0;
+			clickWindowLiveFlag = 0;
 		}
 		default:
 			break;
 		}
 	}
-	XUngrabPointer(display_thread,CurrentTime);
+	XUngrabPointer(click_display,CurrentTime);
 
 OVER:
-    XCloseDisplay(display_thread);
+    XCloseDisplay(click_display);
 #ifdef DEBUG
-	printf("grab over\n\n\n");
+	printf("click grab over\n\n\n");
 #endif
 }
 
-void active()
+void handle_click_signal()
 {
 	if (activeWin != 0)
 	{
 #ifdef DEBUG
-		printf("touch active win :%d\n",activeWin);
+		printf("click active win :%d\n",activeWin);
 #endif
 		int pthread_id = 0;
 		char pthread_arg[20];
 		sprintf(pthread_arg,"%d",activeWin);
 
-		int ret = pthread_create(&pthread_id,NULL,create_grabpointer,(void *)pthread_arg);
+		int ret = pthread_create(&pthread_id,NULL,create_click_thread,(void *)pthread_arg);
+	}
+}
+
+/* ################## MOVE ################## */
+
+void * create_move_thread(void * arg)
+{
+	moveWindowLiveFlag = 1;
+
+	move_display = XOpenDisplay(NULL);
+	char * end;
+	Window win = strtoul((char *)arg,&end,0);
+
+	//judge whether the window exists.
+	if (!isExistWindow(win))
+		goto OVER;
+
+	int ret = XGrabPointer(move_display,win,False,
+			 ButtonPressMask|ButtonReleaseMask|PointerMotionMask|FocusChangeMask|EnterWindowMask|LeaveWindowMask,
+			 GrabModeAsync,GrabModeAsync,
+			 win,
+			 None,CurrentTime);
+
+	if (ret != GrabSuccess)
+	{
+		printf("move grab failure\n");
+		goto OVER;
+	}
+
+	XWindowAttributes windowattribute;
+	XEvent event;
+
+#ifdef DEBUG
+	printf("move grab begin\n");
+#endif
+
+	unsigned long mask = 0l;
+
+	while(moveWindowLiveFlag)
+	{
+		XNextEvent(move_display,&event);
+
+		switch(event.type)
+		{
+		case ButtonPress:
+		{
+			//Don't handle
+		}
+		break;
+		case ButtonRelease:
+		{
+			moveWindowLiveFlag = 0;
+		}
+		default:
+			XSendEvent(move_display,win,False,mask,&event);
+			break;
+		}
+	}
+	XUngrabPointer(move_display,CurrentTime);
+
+OVER:
+    XCloseDisplay(move_display);
+#ifdef DEBUG
+	printf("move grab over\n\n\n");
+#endif
+}
+
+void handle_move_signal()
+{
+	if (activeWin != 0)
+	{
+#ifdef DEBUG
+		printf("move active win :%d\n",activeWin);
+#endif
+		int pthread_id = 0;
+		char pthread_arg[20];
+		sprintf(pthread_arg,"%d",activeWin);
+
+		int ret = pthread_create(&pthread_id,NULL,create_move_thread,(void *)pthread_arg);
 	}
 }
 
@@ -320,6 +401,7 @@ int main(int argc, char * argv[])
 	pid_t pid,sid;
 	int ret;
 
+#if 0
 	pid = fork();
 	if (pid < 0)
 	{
@@ -353,6 +435,7 @@ int main(int argc, char * argv[])
 
 	    return ret;
 	}else if (pid > 0)
+#endif
 	{
 		//Save the pid into file
 		char pidInfo[20];
@@ -375,7 +458,8 @@ int main(int argc, char * argv[])
 		int error;
 		int event;
 
-		signal(SIGALRM,active);
+		signal(SIGALRM,handle_click_signal);
+		signal(SIGUSR1,handle_move_signal);
 
 		focus_window = 0x0;
 		pre_window = 0x0;
