@@ -25,6 +25,10 @@
 #define HAVE_XI22
 #define INVALID_EVENT_TYPE	-1
 
+/* Once xcb-icccm's API is stable, these should be replaced by calls to it */
+# define GET_TEXT_PROPERTY(Dpy, Win, Atom)  xcb_get_property (Dpy, False, Win, Atom, XCB_GET_PROPERTY_TYPE_ANY, 0, 200)
+# define xcb_icccm_get_wm_name(Dpy, Win)  GET_TEXT_PROPERTY(Dpy, Win, XCB_ATOM_WM_NAME)
+
 int xi_opcode;
 int isMoveCursor = 0; //if accept multitouch event , don't move
 int clickWindowLiveFlag = 0;
@@ -41,7 +45,38 @@ static xcb_connection_t *xcb_dpy;
 static xcb_screen_t * xcb_screen;
 static xcb_generic_error_t *err;
 
+int ret_revert;
+
 //#define DEBUG
+
+static char * blacklist_window[] =
+{
+		"devel@", //gnome-terminal
+		"Eclipse",
+		"Mozilla Firefox",
+		"gedit",
+		"Qt Creator",
+		"Desktop",
+		"System Monitor",
+		"Make Startup Disk",
+		"Disks"
+		"NULL"
+};
+
+static char * whitelist_window[] =
+{
+		"E5App",
+		"TouchScreenWnd",
+		"Simulate front panel",
+		"Patient Information",
+		"Maintenance",
+		"Dialog",
+		"Preset",
+		"Form",
+		"WorkSheet",//Report
+		" ", //small Dialog
+		"NULL"
+};
 
 int isExistWindow(Window win)
 {
@@ -78,7 +113,8 @@ void * create_click_thread(void * arg)
 
 	if (ret != GrabSuccess)
 	{
-		printf("grab failure\n");
+		printf("create_click_thread\n");
+		printf("grab failure\n\n\n");
 		goto OVER;
 	}
 
@@ -145,19 +181,32 @@ void * create_move_thread(void * arg)
 	if (!isExistWindow(win))
 		goto OVER;
 
+	XUngrabPointer(move_display,CurrentTime);
+
 	int ret = XGrabPointer(move_display,win,False,
-			 ButtonPressMask|ButtonReleaseMask|PointerMotionMask|FocusChangeMask|EnterWindowMask|LeaveWindowMask,
+			ButtonPressMask|ButtonReleaseMask|PointerMotionMask|FocusChangeMask|EnterWindowMask|LeaveWindowMask,
 			 GrabModeAsync,GrabModeAsync,
 			 win,
 			 None,CurrentTime);
 
-	if (ret != GrabSuccess)
+	//request against
+	if(ret == BadRequest)
 	{
-		printf("move grab failure\n");
-		goto OVER;
+		printf("request again\n");
+		XUngrabPointer(move_display,CurrentTime);
+		ret = XGrabPointer(move_display,win,False,
+					ButtonPressMask|ButtonReleaseMask|PointerMotionMask|FocusChangeMask|EnterWindowMask|LeaveWindowMask,
+					 GrabModeAsync,GrabModeAsync,
+					 win,
+					 None,CurrentTime);
 	}
 
-	XWindowAttributes windowattribute;
+	if (ret != GrabSuccess)
+	{
+			printf("move grab failure\n\n\n");
+			goto OVER;
+	}
+
 	XEvent event;
 
 #ifdef DEBUG
@@ -170,6 +219,8 @@ void * create_move_thread(void * arg)
 	{
 		XNextEvent(move_display,&event);
 
+		XSendEvent(move_display,win,False,mask,&event);
+
 		switch(event.type)
 		{
 		case ButtonPress:
@@ -179,10 +230,9 @@ void * create_move_thread(void * arg)
 		break;
 		case ButtonRelease:
 		{
-			moveWindowLiveFlag = 0;
+//			moveWindowLiveFlag = 0;
 		}
 		default:
-			XSendEvent(move_display,win,False,mask,&event);
 			break;
 		}
 	}
@@ -193,6 +243,11 @@ OVER:
 #ifdef DEBUG
 	printf("move grab over\n\n\n");
 #endif
+}
+
+void handle_move_over_signal ()
+{
+	moveWindowLiveFlag = 0;
 }
 
 void handle_move_signal()
@@ -239,7 +294,7 @@ void change_cursor_shape(Display *display,Window root,Cursor cursor)
 	unsigned int tmp2;
 	Window fromroot,tmpwin;
 	XQueryPointer(display,root,&fromroot,&tmpwin,&x,&y,&tmp,&tmp,&tmp2);
-	XDefineCursor(display,tmpwin,cursor);
+	XDefineCursor(display,root,cursor);
 	XSync(display,False);
 }
 
@@ -395,6 +450,28 @@ int run_filter(Display *display)
 	return EXIT_SUCCESS;
 }
 
+Window get_parent_win(Display * dpy,Window w)
+{
+	Window root_return,parent_return,*child_return;
+	unsigned int count;
+
+	int ret;
+	ret = XQueryTree(dpy,w,&root_return,&parent_return,&child_return,&count);
+	printf("E5App count %d  child_return : %d\n",count,*child_return);
+
+	if (count > 0)
+	{
+		Cursor null_cursor = createnullcursor(dpy,*child_return);
+		XDefineCursor(dpy,*child_return,null_cursor);
+		XSync(dpy,False);
+	}
+#ifdef DEBUG
+	printf("ret = %d parent_return = %dmake",ret,parent_return);
+#endif
+
+	return parent_return;
+}
+
 int main(int argc, char * argv[])
 {
 
@@ -434,7 +511,7 @@ int main(int argc, char * argv[])
 	    XCloseDisplay(display);
 
 	    return ret;
-	}else if (pid > 0)
+	}else if (pid > 0)PointerWindow
 #endif
 	{
 		//Save the pid into file
@@ -460,6 +537,9 @@ int main(int argc, char * argv[])
 
 		signal(SIGALRM,handle_click_signal);
 		signal(SIGUSR1,handle_move_signal);
+		signal(SIGUSR2,handle_move_over_signal);
+
+		struct sigaction act,oact;;
 
 		focus_window = 0x0;
 		pre_window = 0x0;
@@ -467,7 +547,6 @@ int main(int argc, char * argv[])
 		Display * display = XOpenDisplay(NULL);
 
 		xcb_dpy = xcb_connect(NULL,NULL);
-
 
 	    if (display == NULL) {
 	    	fprintf(stderr, "Unable to connect to X server\n");
@@ -480,15 +559,18 @@ int main(int argc, char * argv[])
 	    }
 
 		XWindowAttributes windowattribute;
-		xcb_translate_coordinates_cookie_t trans_coords_cookie;
 
 		static int setFocusCount = 0;
+	    xcb_get_property_reply_t *prop = NULL;
+	    xcb_translate_coordinates_reply_t *trans_coords = NULL;
+
+
 		while(1)
 		{
 			usleep(1000*50);
 			if (display != NULL)
 			{
-				int ret_revert;
+//				int ret_revert;
 
 				focus_window = 0x0;
 
@@ -497,15 +579,23 @@ int main(int argc, char * argv[])
 				//focus_window maybe is equal to 0x1
 				if (focus_window >= 0x100)
 				{
-					XGetWindowAttributes(display,focus_window,&windowattribute);
+					if (isExistWindow(focus_window))
+					{
+						XGetWindowAttributes(display,focus_window,&windowattribute);
 
-					trans_coords_cookie = xcb_translate_coordinates (
+					{
+						xcb_translate_coordinates_cookie_t trans_coords_cookie = xcb_translate_coordinates (
 													xcb_dpy,
 													focus_window,
 													windowattribute.root,
 													-(windowattribute.border_width),
-													focus_window				-(windowattribute.border_width));
-					xcb_translate_coordinates_reply_t *trans_coords=xcb_translate_coordinates_reply (xcb_dpy, trans_coords_cookie, NULL);
+												    -(windowattribute.border_width));
+
+						trans_coords=xcb_translate_coordinates_reply (xcb_dpy, trans_coords_cookie, NULL);
+
+					}
+
+
 
 					flag = 0;
 
@@ -518,6 +608,70 @@ int main(int argc, char * argv[])
 							flag = 1;
 							pre_window = focus_window;
 						}
+#if 0
+						{
+
+							  Atom actual_type;
+							  int actual_format;
+							  unsigned long _nitems;
+							  /*unsigned long nbytes;*/
+							  unsigned long bytes_after; /* unused */
+							  unsigned char *prop2 = NULL;
+							  int status;
+
+	//						  focus_window = focus_window-1;
+							  if (ret_revert == RevertToPointerRoot)
+							  {
+								  status = XGetWindowProperty(display,pre_window,  XInternAtom(display, "_NET_WM_NAME", False),
+										  	  	  	  	      0, (~0L),False,
+										  	  	  	  	      AnyPropertyType, &actual_type,&actual_format,
+										  	  	  	  	      &_nitems, &bytes_after,&prop2);
+							  }
+							  else if (ret_revert == RevertToParent)
+							  {
+	//							  focus_window = get_parent_win(display,focus_window);
+								  status = XGetWindowProperty(display,pre_window,  XInternAtom(display, "WM_NAME", False),
+															  0, (~0L),False,
+															  AnyPropertyType, &actual_type,&actual_format,
+															  &_nitems, &bytes_after,&prop2);
+
+							  }
+							  if (status == BadWindow) {
+							    fprintf(stderr, "window id # 0x%lx does not exists!", pre_window);
+							    return NULL;
+							  } if (status != Success) {
+							    fprintf(stderr, "XGetWindowProperty failed!");
+							    return NULL;
+							  }
+
+					    if (prop2 != NULL)
+					    {
+								int i = 0;
+
+								while (strcmp(whitelist_window[i],"NULL") != 0)
+								{
+									if (strcmp(whitelist_window[i],prop2) != 0)
+									{
+										i++;
+										continue;
+									}
+									else
+									{
+									    printf("WM_NAME : %s\n",prop2);
+									    get_parent_win(display,pre_window);
+										Cursor null_cursor = createnullcursor(display,pre_window);
+	//									change_cursor_shape(display,focus_window,null_cursor);
+										XDefineCursor(display,pre_window,null_cursor);
+										XSync(display,False);
+										break;
+									}
+								}
+					    }
+						}
+#endif
+					}
+
+					free(trans_coords);
 					}
 
 					if (flag == 1)
@@ -539,14 +693,17 @@ int main(int argc, char * argv[])
 							{
 								XGetWindowAttributes(display,activeWin,&windowattribute);
 
-								trans_coords_cookie = xcb_translate_coordinates (
+								{
+									xcb_translate_coordinates_cookie_t  trans_coords_cookie = xcb_translate_coordinates (
 																xcb_dpy,
 																activeWin,
 																windowattribute.root,
 																-(windowattribute.border_width),
 																-(windowattribute.border_width));
-								xcb_translate_coordinates_reply_t *trans_coords=xcb_translate_coordinates_reply (xcb_dpy, trans_coords_cookie, NULL);
 
+									trans_coords=xcb_translate_coordinates_reply (xcb_dpy, trans_coords_cookie, NULL);
+
+								}
 								char command[128];
 								sprintf(command,"xdotool windowfocus %d",activeWin);
 
@@ -561,6 +718,7 @@ int main(int argc, char * argv[])
 										XSetInputFocus(display,activeWin,RevertToNone,CurrentTime);
 								}
 #endif
+								free(trans_coords);
 							}
 						}
 					}
