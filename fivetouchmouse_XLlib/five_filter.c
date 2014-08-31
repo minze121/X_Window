@@ -125,6 +125,9 @@ void * create_click_thread(void * arg)
 	printf("grab begin\n");
 #endif
 
+	static int count = 0;
+	printf("grab begin : %d\n",count++);
+
 	unsigned long mask = 0l;
 
 	while(clickWindowLiveFlag)
@@ -143,9 +146,10 @@ void * create_click_thread(void * arg)
 			break;
 		}
 	}
-	XUngrabPointer(click_display,CurrentTime);
+
 
 OVER:
+	XUngrabPointer(click_display,CurrentTime);
     XCloseDisplay(click_display);
 #ifdef DEBUG
 	printf("click grab over\n\n\n");
@@ -171,8 +175,7 @@ void handle_click_signal()
 
 void * create_move_thread(void * arg)
 {
-	moveWindowLiveFlag = 1;
-
+#if 1
 	move_display = XOpenDisplay(NULL);
 	char * end;
 	Window win = strtoul((char *)arg,&end,0);
@@ -181,14 +184,12 @@ void * create_move_thread(void * arg)
 	if (!isExistWindow(win))
 		goto OVER;
 
-	XUngrabPointer(move_display,CurrentTime);
-
 	int ret = XGrabPointer(move_display,win,False,
 			ButtonPressMask|ButtonReleaseMask|PointerMotionMask|FocusChangeMask|EnterWindowMask|LeaveWindowMask,
 			 GrabModeAsync,GrabModeAsync,
 			 win,
 			 None,CurrentTime);
-
+#if 0
 	//request against
 	if(ret == BadRequest)
 	{
@@ -200,7 +201,7 @@ void * create_move_thread(void * arg)
 					 win,
 					 None,CurrentTime);
 	}
-
+#endif
 	if (ret != GrabSuccess)
 	{
 			printf("move grab failure\n\n\n");
@@ -215,12 +216,25 @@ void * create_move_thread(void * arg)
 
 	unsigned long mask = 0l;
 
+	static int count = 0;
+	moveWindowLiveFlag = 1;
+	printf("%d move grab\n",count++);
 	while(moveWindowLiveFlag)
 	{
-		XNextEvent(move_display,&event);
+		usleep(1000);
+		if (moveWindowLiveFlag)
+			XNextEvent(move_display,&event);
+		else
+			goto OVER;
 
-		XSendEvent(move_display,win,False,mask,&event);
-
+		if (moveWindowLiveFlag)
+		{
+			usleep(1000);
+			if (moveWindowLiveFlag)
+				XSendEvent(move_display,win,False,mask,&event);
+			else
+				goto OVER;
+		}
 		switch(event.type)
 		{
 		case ButtonPress:
@@ -230,19 +244,23 @@ void * create_move_thread(void * arg)
 		break;
 		case ButtonRelease:
 		{
-//			moveWindowLiveFlag = 0;
+			moveWindowLiveFlag = 0;
 		}
 		default:
 			break;
 		}
 	}
-	XUngrabPointer(move_display,CurrentTime);
 
 OVER:
+	XUngrabPointer(move_display,CurrentTime);
+	printf("move grab over\n\n\n");
     XCloseDisplay(move_display);
+
 #ifdef DEBUG
 	printf("move grab over\n\n\n");
 #endif
+#endif
+
 }
 
 void handle_move_over_signal ()
@@ -273,6 +291,7 @@ Cursor createnullcursor(Display *display,Window root)
     XColor dummycolour;
     Cursor cursor;
 
+//    cursormask = XCreatePixmap(display, root, 1, 1, 1/*depth*/);
     cursormask = XCreatePixmap(display, root, 1, 1, 1/*depth*/);
     xgc.function = GXclear;
     gc =  XCreateGC(display, cursormask, GCFunction, &xgc);
@@ -450,26 +469,35 @@ int run_filter(Display *display)
 	return EXIT_SUCCESS;
 }
 
-Window get_parent_win(Display * dpy,Window w)
+Bool get_parent_win(Display * dpy,Window w)
 {
 	Window root_return,parent_return,*child_return;
-	unsigned int count;
+	unsigned int count = 0;
 
 	int ret;
 	ret = XQueryTree(dpy,w,&root_return,&parent_return,&child_return,&count);
-	printf("E5App count %d  child_return : %d\n",count,*child_return);
 
-	if (count > 0)
+	if (count == 0)
+		return False;
+
+	while (count != 0)
 	{
+		printf("E5App count %d  child_return : %d\n",count,*child_return);
+
 		Cursor null_cursor = createnullcursor(dpy,*child_return);
 		XDefineCursor(dpy,*child_return,null_cursor);
 		XSync(dpy,False);
+
+		count--;
+		get_parent_win(dpy,*child_return);
+		child_return++;
 	}
 #ifdef DEBUG
 	printf("ret = %d parent_return = %dmake",ret,parent_return);
 #endif
 
-	return parent_return;
+	return True;
+//	return parent_return;
 }
 
 int main(int argc, char * argv[])
@@ -535,11 +563,12 @@ int main(int argc, char * argv[])
 		int error;
 		int event;
 
+
 		signal(SIGALRM,handle_click_signal);
 		signal(SIGUSR1,handle_move_signal);
 		signal(SIGUSR2,handle_move_over_signal);
 
-		struct sigaction act,oact;;
+		struct sigaction act,oact;
 
 		focus_window = 0x0;
 		pre_window = 0x0;
@@ -548,6 +577,27 @@ int main(int argc, char * argv[])
 
 		xcb_dpy = xcb_connect(NULL,NULL);
 
+		  int screen_num = DefaultScreen(display);
+//		  Window rootWindow = RootWindow(display,screen_num);
+
+		  Window rootWindow = DefaultRootWindow(display);
+		XWindowAttributes windowattribute;
+
+			static int setFocusCount = 0;
+		    xcb_get_property_reply_t *prop = NULL;
+		    xcb_translate_coordinates_reply_t *trans_coords = NULL;
+
+			XGetWindowAttributes(display,rootWindow,&windowattribute);
+
+			int E5 = 0;
+			if ((screen_num == 0) && (windowattribute.width == 3200) && (windowattribute.height == 1280))
+			{
+				E5 = 1;
+			}
+#ifdef DEBUG
+		printf("trans_coords : %d  %d\n",windowattribute.width,windowattribute.height);
+		printf("screen number : %d\n",screen_num);
+#endif
 	    if (display == NULL) {
 	    	fprintf(stderr, "Unable to connect to X server\n");
 	    	goto out;
@@ -558,11 +608,7 @@ int main(int argc, char * argv[])
 	        goto out;
 	    }
 
-		XWindowAttributes windowattribute;
 
-		static int setFocusCount = 0;
-	    xcb_get_property_reply_t *prop = NULL;
-	    xcb_translate_coordinates_reply_t *trans_coords = NULL;
 
 
 		while(1)
@@ -608,7 +654,14 @@ int main(int argc, char * argv[])
 							flag = 1;
 							pre_window = focus_window;
 						}
-#if 0
+
+					}
+
+					free(trans_coords);
+					}
+
+#if 1
+					if ((E5) && (activeWin != 0x0) && (isExistWindow(activeWin)))
 						{
 
 							  Atom actual_type;
@@ -619,25 +672,28 @@ int main(int argc, char * argv[])
 							  unsigned char *prop2 = NULL;
 							  int status;
 
+							  Window nullWindow = activeWin;
 	//						  focus_window = focus_window-1;
 							  if (ret_revert == RevertToPointerRoot)
 							  {
-								  status = XGetWindowProperty(display,pre_window,  XInternAtom(display, "_NET_WM_NAME", False),
+								  status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
 										  	  	  	  	      0, (~0L),False,
 										  	  	  	  	      AnyPropertyType, &actual_type,&actual_format,
 										  	  	  	  	      &_nitems, &bytes_after,&prop2);
 							  }
+
 							  else if (ret_revert == RevertToParent)
 							  {
 	//							  focus_window = get_parent_win(display,focus_window);
-								  status = XGetWindowProperty(display,pre_window,  XInternAtom(display, "WM_NAME", False),
+								  status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "WM_NAME", False),
 															  0, (~0L),False,
 															  AnyPropertyType, &actual_type,&actual_format,
 															  &_nitems, &bytes_after,&prop2);
 
 							  }
+
 							  if (status == BadWindow) {
-							    fprintf(stderr, "window id # 0x%lx does not exists!", pre_window);
+							    fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
 							    return NULL;
 							  } if (status != Success) {
 							    fprintf(stderr, "XGetWindowProperty failed!");
@@ -657,11 +713,11 @@ int main(int argc, char * argv[])
 									}
 									else
 									{
-									    printf("WM_NAME : %s\n",prop2);
-									    get_parent_win(display,pre_window);
-										Cursor null_cursor = createnullcursor(display,pre_window);
+//									    printf("WM_NAME : %s\n",prop2);
+									    get_parent_win(display,nullWindow);
+										Cursor null_cursor = createnullcursor(display,nullWindow);
 	//									change_cursor_shape(display,focus_window,null_cursor);
-										XDefineCursor(display,pre_window,null_cursor);
+										XDefineCursor(display,nullWindow,null_cursor);
 										XSync(display,False);
 										break;
 									}
@@ -669,10 +725,6 @@ int main(int argc, char * argv[])
 					    }
 						}
 #endif
-					}
-
-					free(trans_coords);
-					}
 
 					if (flag == 1)
 					{
