@@ -47,7 +47,9 @@ static xcb_generic_error_t *err;
 
 int ret_revert;
 
-//#define DEBUG
+#define DEBUG
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char * blacklist_window[] =
 {
@@ -75,6 +77,8 @@ static char * whitelist_window[] =
 		"Form",
 		"WorkSheet",//Report
 		" ", //small Dialog
+		"Import exam path",
+		"Export exam path",
 		"NULL"
 };
 
@@ -85,7 +89,7 @@ int isExistWindow(Window win)
 	xcb_get_geometry_reply_t * geometry = xcb_get_geometry_reply(xcb_dpy, gg_cookie, &err);
 
 	if (!geometry) {
-		printf("Can't find active window : %d\n",win);
+		printf("Can't find active window : 0x%x\n",(int)win);
 		return 0;
 	}
 	//It can find normal.
@@ -95,11 +99,12 @@ int isExistWindow(Window win)
 /* ################## CLICK ################## */
 void * create_click_thread(void * arg)
 {
-	clickWindowLiveFlag = 1;
+	moveWindowLiveFlag = 0;
+
+	pthread_mutex_lock(&mutex);
 
 	click_display = XOpenDisplay(NULL);
-	char * end;
-	Window win = strtoul((char *)arg,&end,0);
+	Window win = (Window)arg;
 
 	//judge whether the window exists.
 	if (!isExistWindow(win))
@@ -113,7 +118,7 @@ void * create_click_thread(void * arg)
 
 	if (ret != GrabSuccess)
 	{
-		printf("create_click_thread\n");
+		printf("create_click_thread 0x%x\n",(int)win);
 		printf("grab failure\n\n\n");
 		goto OVER;
 	}
@@ -125,15 +130,12 @@ void * create_click_thread(void * arg)
 	printf("grab begin\n");
 #endif
 
-	static int count = 0;
-	printf("grab begin : %d\n",count++);
-
 	unsigned long mask = 0l;
+	clickWindowLiveFlag = 1;
 
 	while(clickWindowLiveFlag)
 	{
 		XNextEvent(click_display,&event);
-
 		XSendEvent(click_display,win,False,mask,&event);
 
 		switch(event.type)
@@ -147,13 +149,13 @@ void * create_click_thread(void * arg)
 		}
 	}
 
-
 OVER:
 	XUngrabPointer(click_display,CurrentTime);
     XCloseDisplay(click_display);
 #ifdef DEBUG
 	printf("click grab over\n\n\n");
 #endif
+	pthread_mutex_unlock(&mutex);
 }
 
 void handle_click_signal()
@@ -163,11 +165,9 @@ void handle_click_signal()
 #ifdef DEBUG
 		printf("click active win :%d\n",activeWin);
 #endif
-		int pthread_id = 0;
-		char pthread_arg[20];
-		sprintf(pthread_arg,"%d",activeWin);
+		pthread_t pthread_id = 0;
 
-		int ret = pthread_create(&pthread_id,NULL,create_click_thread,(void *)pthread_arg);
+		int ret = pthread_create(&pthread_id,NULL,create_click_thread,(void *)activeWin);
 	}
 }
 
@@ -176,9 +176,11 @@ void handle_click_signal()
 void * create_move_thread(void * arg)
 {
 #if 1
+	clickWindowLiveFlag = 1;
+	pthread_mutex_lock(&mutex);
+
 	move_display = XOpenDisplay(NULL);
-	char * end;
-	Window win = strtoul((char *)arg,&end,0);
+	Window win = (Window)arg;
 
 	//judge whether the window exists.
 	if (!isExistWindow(win))
@@ -218,7 +220,7 @@ void * create_move_thread(void * arg)
 
 	static int count = 0;
 	moveWindowLiveFlag = 1;
-	printf("%d move grab\n",count++);
+	printf("%d move grab   WIN : 0x%x\n",count++,(int)win);
 	while(moveWindowLiveFlag)
 	{
 		usleep(1000);
@@ -253,12 +255,14 @@ void * create_move_thread(void * arg)
 
 OVER:
 	XUngrabPointer(move_display,CurrentTime);
-	printf("move grab over\n\n\n");
     XCloseDisplay(move_display);
 
 #ifdef DEBUG
 	printf("move grab over\n\n\n");
 #endif
+
+	pthread_mutex_unlock(&mutex);
+
 #endif
 
 }
@@ -275,11 +279,9 @@ void handle_move_signal()
 #ifdef DEBUG
 		printf("move active win :%d\n",activeWin);
 #endif
-		int pthread_id = 0;
-		char pthread_arg[20];
-		sprintf(pthread_arg,"%d",activeWin);
+		pthread_t pthread_id = 0;
 
-		int ret = pthread_create(&pthread_id,NULL,create_move_thread,(void *)pthread_arg);
+		int ret = pthread_create(&pthread_id,NULL,create_move_thread,(void *)activeWin);
 	}
 }
 
@@ -348,7 +350,7 @@ XIDeviceInfo* find_device_info_xi2(Display *display, char *name)
 
     return found;
 }
-
+#if 0
 int run_filter(Display *display)
 {
 	Window root =DefaultRootWindow(display);
@@ -468,35 +470,40 @@ int run_filter(Display *display)
 
 	return EXIT_SUCCESS;
 }
-
+#endif
 Bool get_parent_win(Display * dpy,Window w)
 {
-	Window root_return,parent_return,*child_return;
-	unsigned int count = 0;
-
-	int ret;
-	ret = XQueryTree(dpy,w,&root_return,&parent_return,&child_return,&count);
-
-	if (count == 0)
-		return False;
-
-	while (count != 0)
+	if (isExistWindow (w))
 	{
-		printf("E5App count %d  child_return : %d\n",count,*child_return);
+		Window root_return,parent_return,*child_return;
+		unsigned int count = 0;
 
-		Cursor null_cursor = createnullcursor(dpy,*child_return);
-		XDefineCursor(dpy,*child_return,null_cursor);
-		XSync(dpy,False);
+		int ret;
+		ret = XQueryTree(dpy,w,&root_return,&parent_return,&child_return,&count);
 
-		count--;
-		get_parent_win(dpy,*child_return);
-		child_return++;
+		if (count == 0)
+			return False;
+
+		while (count != 0)
+		{
+//			printf("	count %d  child_return : 0x%xd\n",count,(int)*child_return);
+
+			Cursor null_cursor = createnullcursor(dpy,*child_return);
+			XDefineCursor(dpy,*child_return,null_cursor);
+			XSync(dpy,False);
+
+			count--;
+			get_parent_win(dpy,*child_return);
+			child_return++;
+		}
+
+		if (child_return)
+			free(child_return);
+
+		return True;
 	}
-#ifdef DEBUG
-	printf("ret = %d parent_return = %dmake",ret,parent_return);
-#endif
-
-	return True;
+	else
+		return False;
 //	return parent_return;
 }
 
@@ -551,7 +558,8 @@ int main(int argc, char * argv[])
 #ifdef DEBUG
 			printf("pidInfo : %s\n",pidInfo);
 #endif
-			write(fd,pidInfo,strlen(pidInfo));
+			int length = (int)strlen(pidInfo);
+			write(fd,pidInfo,length);
 		}
 		else
 		{
@@ -585,7 +593,7 @@ int main(int argc, char * argv[])
 
 			static int setFocusCount = 0;
 		    xcb_get_property_reply_t *prop = NULL;
-		    xcb_translate_coordinates_reply_t *trans_coords = NULL;
+
 
 			XGetWindowAttributes(display,rootWindow,&windowattribute);
 
@@ -629,7 +637,6 @@ int main(int argc, char * argv[])
 					{
 						XGetWindowAttributes(display,focus_window,&windowattribute);
 
-					{
 						xcb_translate_coordinates_cookie_t trans_coords_cookie = xcb_translate_coordinates (
 													xcb_dpy,
 													focus_window,
@@ -637,31 +644,27 @@ int main(int argc, char * argv[])
 													-(windowattribute.border_width),
 												    -(windowattribute.border_width));
 
+						xcb_translate_coordinates_reply_t * trans_coords = NULL;
+
 						trans_coords=xcb_translate_coordinates_reply (xcb_dpy, trans_coords_cookie, NULL);
 
-					}
+						if (trans_coords == NULL)
+							printf("trans_coords null \n ");
 
-
-
-					flag = 0;
-
-					//The window is in Main Screen
-					if ((trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
-					{
-						//Full screen
-//						if ((windowattributrans_coords_cookiete.width == 1920))
+						//The window is in Main Screen
+						if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
 						{
-							flag = 1;
 							pre_window = focus_window;
+							activeWin = pre_window;
+							setFocusCount = 0;
+
 						}
 
-					}
+						if (trans_coords)
+							free(trans_coords);
+						}
 
-					free(trans_coords);
-					}
-
-#if 1
-					if ((E5) && (activeWin != 0x0) && (isExistWindow(activeWin)))
+						if ((E5) && (activeWin != 0x0) && (isExistWindow(activeWin)))
 						{
 
 							  Atom actual_type;
@@ -673,35 +676,34 @@ int main(int argc, char * argv[])
 							  int status;
 
 							  Window nullWindow = activeWin;
-	//						  focus_window = focus_window-1;
+
 							  if (ret_revert == RevertToPointerRoot)
 							  {
 								  status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
-										  	  	  	  	      0, (~0L),False,
-										  	  	  	  	      AnyPropertyType, &actual_type,&actual_format,
-										  	  	  	  	      &_nitems, &bytes_after,&prop2);
+															  0, (~0L),False,
+															  AnyPropertyType, &actual_type,&actual_format,
+															  &_nitems, &bytes_after,&prop2);
 							  }
 
 							  else if (ret_revert == RevertToParent)
 							  {
 	//							  focus_window = get_parent_win(display,focus_window);
-								  status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "WM_NAME", False),
-															  0, (~0L),False,
-															  AnyPropertyType, &actual_type,&actual_format,
-															  &_nitems, &bytes_after,&prop2);
-
+	//								  status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "WM_NAME", False),
+	//															  0, (~0L),False,
+	//															  AnyPropertyType, &actual_type,&actual_format,
+	//															  &_nitems, &bytes_after,&prop2);
 							  }
 
 							  if (status == BadWindow) {
-							    fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
-							    return NULL;
+								fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+
 							  } if (status != Success) {
-							    fprintf(stderr, "XGetWindowProperty failed!");
-							    return NULL;
+								fprintf(stderr, "XGetWindowProperty failed!");
+
 							  }
 
-					    if (prop2 != NULL)
-					    {
+							if (prop2 != NULL)
+							{
 								int i = 0;
 
 								while (strcmp(whitelist_window[i],"NULL") != 0)
@@ -713,70 +715,30 @@ int main(int argc, char * argv[])
 									}
 									else
 									{
-//									    printf("WM_NAME : %s\n",prop2);
-									    get_parent_win(display,nullWindow);
+										get_parent_win(display,nullWindow);
 										Cursor null_cursor = createnullcursor(display,nullWindow);
-	//									change_cursor_shape(display,focus_window,null_cursor);
+
 										XDefineCursor(display,nullWindow,null_cursor);
 										XSync(display,False);
 										break;
 									}
 								}
-					    }
+							}
 						}
-#endif
 
-					if (flag == 1)
-					{
-#ifdef DEBUG
-						printf("focus window: %d\n",pre_window);
-						printf("x %d\n", (int16_t)trans_coords->dst_x);
-						printf("y %d\n", (int16_t)trans_coords->dst_y);
-#endif
-						activeWin = pre_window;
-						setFocusCount = 0;
-					}
-					//reset the focus
-					if ((activeWin != 0x0) && (windowattribute.width != 1920))
-					{
-						if (setFocusCount%20 == 0)
+						//reset the focus
+						if ((activeWin != 0x0) && (windowattribute.width != 1920))
 						{
 							if (isExistWindow(activeWin))
 							{
-								XGetWindowAttributes(display,activeWin,&windowattribute);
-
-								{
-									xcb_translate_coordinates_cookie_t  trans_coords_cookie = xcb_translate_coordinates (
-																xcb_dpy,
-																activeWin,
-																windowattribute.root,
-																-(windowattribute.border_width),
-																-(windowattribute.border_width));
-
-									trans_coords=xcb_translate_coordinates_reply (xcb_dpy, trans_coords_cookie, NULL);
-
-								}
 								char command[128];
-								sprintf(command,"xdotool windowfocus %d",activeWin);
-
+								sprintf(command,"xdotool windowfocus %d",(int)activeWin);
 								int result = system(command);
-#if 0
-								if ((trans_coords->dst_x >= 1280) && ((trans_coords->dst_y >= 0)) && (windowattribute.width == 1920))
-								{
-									static int count = 0;
-									printf("%d setInputFocus : %d\n",count++,activeWin);
-									printf("windowattribute : x %d y %d width %d  height %d\n",trans_coords->dst_x,trans_coords->dst_y,windowattribute.width,windowattribute.height);
-									if (isExistWindow(activeWin))
-										XSetInputFocus(display,activeWin,RevertToNone,CurrentTime);
-								}
-#endif
-								free(trans_coords);
 							}
 						}
 					}
 				}
 			}
-		}
 
 		XSync(display, False);
 		XCloseDisplay(display);
