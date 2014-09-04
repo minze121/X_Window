@@ -34,6 +34,7 @@ int isMoveCursor = 0; //if accept multitouch event , don't move
 int clickWindowLiveFlag = 0;
 int moveWindowLiveFlag = 0;
 int E5 = 0;
+Cursor null_cursor ;
 
 Display * click_display;
 Display * move_display;
@@ -55,8 +56,8 @@ int ret_revert;
 
 #define DEBUG
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
+pthread_mutex_t click_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t move_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char * blacklist_window[] =
 {
 		"devel@", //gnome-terminal
@@ -162,73 +163,110 @@ int isExpectWindow(Display * display,Window win,char * windowList[])
 
 		Window nullWindow = win;
 
-		status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
-				  0, (~0L),False,
-				  AnyPropertyType, &actual_type,&actual_format,
-				  &_nitems, &bytes_after,&wm_name);
-
-		if (status == BadWindow)
+		//_NET_WM_NAME
 		{
-			fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
-			return 0;
-		}
-		if (status != Success)
-		{
-			fprintf(stderr, "XGetWindowProperty failed!");
-			return 0;
-		}
+			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
+					  0, (~0L),False,
+					  AnyPropertyType, &actual_type,&actual_format,
+					  &_nitems, &bytes_after,&wm_name);
 
-		if (wm_name != NULL)
-		{
-			int i = 0;
-
-			while (strcmp(windowList[i],"NULL") != 0)
+			if (status == BadWindow)
 			{
-				if (strcmp(windowList[i],wm_name) != 0)
+				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+				return 0;
+			}
+			if (status != Success)
+			{
+				fprintf(stderr, "XGetWindowProperty failed!");
+				return 0;
+			}
+
+			if (wm_name != NULL)
+			{
+				int i = 0;
+
+				while (strcmp(windowList[i],"NULL") != 0)
 				{
-					i++;
-					continue;
-				}
-				else
-				{
-					return 1;
+					if (strcmp(windowList[i],wm_name) != 0)
+					{
+						i++;
+						continue;
+					}
+					else
+					{
+						return 1;
+					}
 				}
 			}
 		}
+#if 0
+		//WM_NAME
+		{
+			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "WM_NAME", False),
+					  0, (~0L),False,
+					  AnyPropertyType, &actual_type,&actual_format,
+					  &_nitems, &bytes_after,&wm_name);
+
+			if (status == BadWindow)
+			{
+				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+				return 0;
+			}
+			if (status != Success)
+			{
+				fprintf(stderr, "XGetWindowProperty failed!");
+				return 0;
+			}
+
+			if (wm_name != NULL)
+			{
+				int i = 0;
+
+				while (strcmp(windowList[i],"NULL") != 0)
+				{
+					if (strcmp(windowList[i],wm_name) != 0)
+					{
+						i++;
+						continue;
+					}
+					else
+					{
+						return 1;
+					}
+				}
+			}
+		}
+#endif
 	}
 	return 0;
 }
 
 /* ################## create null cursor ################## */
-Cursor createnullcursor(Display *display,Window root)
+Cursor createnullcursor(Display *display)
 {
 	Cursor cursor;
-	if (isExistWindow (root))
-	{
-		Pixmap cursormask;
-		XGCValues xgc;
-		GC gc;
-		XColor dummycolour;
+	Pixmap cursormask;
+	XGCValues xgc;
+	GC gc;
+	XColor dummycolour;
 
-		cursormask = XCreatePixmap(display, root, 1, 1, 1/*depth*/);
-		xgc.function = GXclear;
-		gc =  XCreateGC(display, cursormask, GCFunction, &xgc);
-		XFillRectangle(display, cursormask, gc, 0, 0, 1, 1);
-		dummycolour.pixel = 0;
-		dummycolour.red = 0;
-		dummycolour.flags = 04;
-		cursor = XCreatePixmapCursor(display, cursormask, cursormask,
-			  &dummycolour,&dummycolour, 0,0);
-		XFreePixmap(display,cursormask);
-		XFreeGC(display,gc);
-	}
+	cursormask = XCreatePixmap(display, XRootWindow(display,0), 1, 1, 1/*depth*/);
+	xgc.function = GXclear;
+	gc =  XCreateGC(display, cursormask, GCFunction, &xgc);
+	XFillRectangle(display, cursormask, gc, 0, 0, 1, 1);
+	dummycolour.pixel = 0;
+	dummycolour.red = 0;
+	dummycolour.flags = 04;
+	cursor = XCreatePixmapCursor(display, cursormask, cursormask,
+		  &dummycolour,&dummycolour, 0,0);
+	XFreePixmap(display,cursormask);
+	XFreeGC(display,gc);
 
 	return cursor;
 }
 
 void change_cursor_shape(Display *display,Window root)
 {
-	Cursor null_cursor = createnullcursor(display,root);
 	XDefineCursor(display,root,null_cursor);
 	XSync(display,False);
 }
@@ -239,7 +277,7 @@ void * create_click_thread(void * arg)
 {
 	moveWindowLiveFlag = 0;
 
-	pthread_mutex_lock(&mutex);
+	pthread_mutex_lock(&click_mutex);
 
 	click_display = XOpenDisplay(NULL);
 	Window win = (Window)arg;
@@ -292,7 +330,7 @@ OVER:
 #ifdef DEBUG
 	printf("click grab over\n\n\n");
 #endif
-	pthread_mutex_unlock(&mutex);
+	pthread_mutex_unlock(&click_mutex);
 }
 
 void handle_click_signal()
@@ -312,11 +350,11 @@ void handle_click_signal()
 pthread_t move_pthread_id = 0;
 
 void * create_move_thread(void * arg)
+//void create_move_thread( )
 {
 	clickWindowLiveFlag = 0;
 
-
-	pthread_mutex_lock(&mutex);
+	pthread_mutex_lock(&move_mutex);
 
 	move_display = XOpenDisplay(NULL);
 	Window win = (Window)arg;
@@ -399,7 +437,7 @@ void * create_move_thread(void * arg)
 					break;
 				}
 			}
-			usleep(100);
+			usleep(200);
 		}
 
 		XFlush(move_display);
@@ -412,7 +450,7 @@ OVER:
 	printf("move grab over\n\n\n");
 #endif
 
-	pthread_mutex_unlock(&mutex);
+	pthread_mutex_unlock(&move_mutex);
 }
 
 void handle_move_signal()
@@ -485,6 +523,22 @@ Bool get_child_win(Display * dpy,Window w)
 		return False;
 }
 
+Window get_parent_win(Display * dpy,Window w)
+{
+	Window root_return = 0x0,parent_return = 0x0,*child_return = NULL;
+	unsigned int count = 0;
+
+	if (isExistWindow (w))
+	{
+		int ret;
+		ret = XQueryTree(dpy,w,&root_return,&parent_return,&child_return,&count);
+		if ((count != 0) && (child_return))
+			free(child_return);
+
+	}
+	return parent_return;
+}
+
 int main(int argc, char * argv[])
 {
 
@@ -514,6 +568,7 @@ int main(int argc, char * argv[])
 	signal(SIGALRM,handle_click_signal);
 	signal(SIGUSR1,handle_move_signal);
 
+
 	/******************** X Window : Init ********************/
 
 	int error = 0;
@@ -540,6 +595,7 @@ int main(int argc, char * argv[])
 		goto out;
 	}
 
+	null_cursor = createnullcursor(display);
 
 	//judge whether E5
 	int screen_num = DefaultScreen(display);
@@ -559,7 +615,8 @@ int main(int argc, char * argv[])
 	printf("trans_coords : %d  %d\n",windowattribute.width,windowattribute.height);
 	printf("screen number : %d\n",screen_num);
 #endif
-	int flag = 0;
+	int startNullCursorThreadFlag = 0;
+	int revertInputFocus = 0;
 	while(1)
 	{
 		usleep(1000*50);
@@ -568,13 +625,19 @@ int main(int argc, char * argv[])
 		{
 			focus_window = 0x0;
 
-			XGetInputFocus(display,&focus_window,&ret_revert);
+			revertInputFocus = XGetInputFocus(display,&focus_window,&ret_revert);
 
 			//focus_window maybe is equal to 0x1
 			if ((focus_window >= 0x100))
 			{
 				if (isExistWindow(focus_window))
 				{
+#if 0
+					if (revertInputFocus == RevertToPointerRoot)
+					{
+						focus_window = get_parent_win(display,focus_window);
+					}
+#endif
 					//Touch Device
 				    if (isExpectWindow(display,focus_window,touch_device_name))
 				    {
@@ -612,13 +675,13 @@ int main(int argc, char * argv[])
 							currentActiveWindowNumber++;
 						}
 
-						if (flag == 0)
+						if (startNullCursorThreadFlag == 0)
 						{
 							pthread_t pthread_id = 0;
 
 							int ret = pthread_create(&pthread_id,NULL,create_null_cursor_thread,NULL);
 
-							flag = 1;
+							startNullCursorThreadFlag = 1;
 						}
 					}
 
