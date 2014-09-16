@@ -5,6 +5,9 @@ PTHREAD_LIB =-lpthread
 
 all:
 	gcc -g  five_filter.c $(I)$(DBUS_INCLUDE) $(DBUS_LIB) $(PTHREAD_LIB) $(X11_LIBS) -o five_filter -g
+	gcc find_mouse.c -o find_mouse
+	gcc mouse_grab_method1.c -o mouse_grab_method
+	
 	
 clean:
 	rm -rf *.o five_filter read_mouse_pos

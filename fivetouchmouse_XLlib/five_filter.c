@@ -1,3 +1,20 @@
+/*
+ *Function:
+ *		1.Click
+ *		2.Move
+ *		3.Focus
+ *		4.Null Cursor
+ *
+ *Implement:
+ *		1.XGetInputFocus
+ *		2.XGrabPointer
+ *		3.XGetWindowAttributes
+ *		4.XQueryTree
+ *
+ *Tool:
+ *		1.xdotool
+ */
+
 //Common
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,6 +117,7 @@ static char * focus_window_name[] =
 {
 		"Patient Information",
 		"Form",
+		"Dialog",
 		"NULL"
 };
 
@@ -490,7 +508,7 @@ Bool get_child_win(Display * dpy,Window w)
 {
 	if (isExistWindow (w))
 	{
-		Window root_return,parent_return,*child_return = NULL;
+		Window root_return,parent_return,*child_return = NULL,*child_backup_return = NULL;
 		unsigned int count = 0;
 
 		int ret;
@@ -504,6 +522,7 @@ Bool get_child_win(Display * dpy,Window w)
 			return False;
 		}
 
+		child_backup_return = child_return;
 		while (count != 0)
 		{
 //			printf("	count %d  child_return : 0x%xd\n",count,(int)*child_return);
@@ -514,8 +533,8 @@ Bool get_child_win(Display * dpy,Window w)
 			child_return++;
 		}
 
-		if (child_return != NULL)
-			free(child_return);
+		if (child_backup_return != NULL)
+			free(child_backup_return);
 
 		return True;
 	}
