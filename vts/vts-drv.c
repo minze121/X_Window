@@ -7,12 +7,10 @@
 #include <linux/device.h>
 #include <linux/miscdevice.h>
 #include <asm/uaccess.h>
-
 #include <linux/input.h>
 
-#define VTS_MISCDEV_MINOR	183 
-
 struct input_dev *input_dev;
+#define VTS_MISCDEV_MINOR	183
 
 static int vts_open(struct inode *inode,struct file *filp) {
 	return 0;
@@ -29,14 +27,8 @@ static ssize_t vts_write(struct file *filp,const char *buf,size_t count,loff_t
 	x = kbuf[0];
 	y = kbuf[1];
 
-	printk("%s:<x:%d  y:%d>\n", __func__, x, y);
-
-	input_report_key(input_dev, BTN_TOUCH, 1);
 	input_report_abs(input_dev, ABS_X, x);
 	input_report_abs(input_dev, ABS_Y, y);
-	input_sync(input_dev);
-
-	input_report_key(input_dev, BTN_TOUCH, 0);
 	input_sync(input_dev);
 
 	return count;
@@ -51,10 +43,8 @@ static struct file_operations vts_fops = {
 	.owner   = THIS_MODULE,
 	.open    = vts_open,
 	.write   = vts_write,
-	.release = vts_release,
+	.release = vts_release
 };
-
-
 
 static struct miscdevice vts_miscdev = {
 	.minor		= VTS_MISCDEV_MINOR,
@@ -75,10 +65,10 @@ static int __init vts_init(void)
 	}
 
 	input_dev->name = "vts";
-	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
-	input_dev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
-	input_set_abs_params(input_dev, ABS_X,  0, 2049, 0, 0);
-	input_set_abs_params(input_dev, ABS_Y,  0, 2048, 0, 0);
+	input_dev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_SYN)| BIT_MASK(EV_ABS);
+	input_dev->keybit[BIT_WORD(BTN_MOUSE)] = BIT_MASK(BTN_MOUSE);
+	input_set_abs_params(input_dev, ABS_X,  0, 3200, 0, 0);
+	input_set_abs_params(input_dev, ABS_Y,  0, 1280, 0, 0);
 
 	err = input_register_device(input_dev);
 	if (err) {
@@ -92,10 +82,7 @@ static int __init vts_init(void)
 		goto err1;
 	}
 
-	printk("%s OK\n", __func__);
-
 	return 0;
-
 
 err1:
 	input_unregister_device(input_dev);
@@ -110,7 +97,6 @@ static void __exit vts_exit(void) {
 	input_unregister_device(input_dev);
 	input_free_device(input_dev);
 }
-
 
 module_init(vts_init);
 module_exit(vts_exit);
