@@ -130,6 +130,7 @@ int main()
 	chmod(MOUSE_DEVICE_FILE,S_IRWXU|S_IRWXG|S_IRWXO);
 
 	chmod(filename,S_IRWXU|S_IRWXG|S_IRWXO);
+	system("chown devel.devel /home/devel/MOUSE_DEVICE_FILE");
 
 	printf("mouse device file : %s\n",filename);
 

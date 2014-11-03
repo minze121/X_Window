@@ -59,7 +59,9 @@ Display * move_display;
 Window activeWin = 0;
 Window focus_window = 0;
 Window pre_window = 0;
-Window hadnoexist_window = 0;
+
+Window tenTouchWId = 0;
+Window fiveTouchWId = 0;
 
 #define MAX 20
 Window activeWinStack[MAX];
@@ -103,6 +105,8 @@ static char * whitelist_window[] =
 		"Import exam path",
 		"Export exam path",
 		"Open Directory",
+		"Tools for Engineer",
+		"Print Preview",
 		"NULL"
 };
 
@@ -118,6 +122,8 @@ static char * focus_window_name[] =
 		"Patient Information",
 		"Form",
 		"Dialog",
+		" ",
+		"E5App",
 		"NULL"
 };
 
@@ -380,6 +386,7 @@ void * create_move_thread(void * arg)
 	if (!isExpectWindow(move_display,win,move_window_name))
 		goto OVER;
 
+	Window hadnoexist_window = 0;
 	//judge whether the window exists.
 	if (!isExistWindow(win))
 		goto OVER;
@@ -423,6 +430,7 @@ void * create_move_thread(void * arg)
 				//Don't handle
 			}
 			break;
+			Window hadnoexist_window = 0;
 			case ButtonRelease:
 			{
 				moveWindowLiveFlag = 0;
@@ -506,6 +514,7 @@ void * create_null_cursor_thread(void * arg)
 
 Bool get_child_win(Display * dpy,Window w)
 {
+	Window hadnoexist_window = 0;
 	if (isExistWindow (w))
 	{
 		Window root_return,parent_return,*child_return = NULL,*child_backup_return = NULL;
@@ -640,7 +649,7 @@ int main(int argc, char * argv[])
 	{
 		usleep(1000*50);
 
-		if (display != NULL)
+		if (E5 && (display != NULL))
 		{
 			focus_window = 0x0;
 
