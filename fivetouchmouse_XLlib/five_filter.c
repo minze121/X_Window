@@ -107,6 +107,7 @@ static char * whitelist_window[] =
 		"Open Directory",
 		"Tools for Engineer",
 		"Print Preview",
+		"Message",
 		"NULL"
 };
 
@@ -124,6 +125,7 @@ static char * focus_window_name[] =
 		"Dialog",
 		" ",
 		"E5App",
+		"Message",
 		"NULL"
 };
 
@@ -265,6 +267,49 @@ int isExpectWindow(Display * display,Window win,char * windowList[])
 	return 0;
 }
 
+int getWindowName(Display * display,Window win,char * name)
+{
+	if (isExistWindow(win))
+	{
+		//Get Window Attributes
+		Atom actual_type;
+		int actual_format;
+		unsigned long _nitems;
+		/*unsigned long nbytes;*/
+		unsigned long bytes_after; /* unused */
+		unsigned char *wm_name = NULL;
+
+		int status = 0;
+
+		Window nullWindow = win;
+
+		//_NET_WM_NAME
+		{
+			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
+					  0, (~0L),False,
+					  AnyPropertyType, &actual_type,&actual_format,
+					  &_nitems, &bytes_after,&wm_name);
+
+			if (status == BadWindow)
+			{
+				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+				return 0;
+			}
+			if (status != Success)
+			{
+				fprintf(stderr, "XGetWindowProperty failed!");
+				return 0;
+			}
+
+			if ((wm_name != NULL) && (strlen(wm_name) > 0))
+			{
+				strcpy(name,wm_name);
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
 /* ################## create null cursor ################## */
 Cursor createnullcursor(Display *display)
 {
@@ -302,7 +347,7 @@ void * create_click_thread(void * arg)
 	moveWindowLiveFlag = 0;
 
 	pthread_mutex_lock(&click_mutex);
-
+	char name[240];
 	click_display = XOpenDisplay(NULL);
 	Window win = (Window)arg;
 
@@ -349,11 +394,16 @@ void * create_click_thread(void * arg)
 	}
 
 OVER:
+#ifdef DEBUG
+
+	if (getWindowName(click_display,win,name))
+		printf("click grab over : %s\n\n\n",name);
+	else
+		printf("click grab over\n\n\n");
+#endif
 	XUngrabPointer(click_display,CurrentTime);
     XCloseDisplay(click_display);
-#ifdef DEBUG
-	printf("click grab over\n\n\n");
-#endif
+
 	pthread_mutex_unlock(&click_mutex);
 }
 
@@ -379,14 +429,13 @@ void * create_move_thread(void * arg)
 	clickWindowLiveFlag = 0;
 
 	pthread_mutex_lock(&move_mutex);
-
+	char name[240];
 	move_display = XOpenDisplay(NULL);
 	Window win = (Window)arg;
 
 	if (!isExpectWindow(move_display,win,move_window_name))
 		goto OVER;
 
-	Window hadnoexist_window = 0;
 	//judge whether the window exists.
 	if (!isExistWindow(win))
 		goto OVER;
@@ -430,7 +479,6 @@ void * create_move_thread(void * arg)
 				//Don't handle
 			}
 			break;
-			Window hadnoexist_window = 0;
 			case ButtonRelease:
 			{
 				moveWindowLiveFlag = 0;
@@ -468,13 +516,17 @@ void * create_move_thread(void * arg)
 
 		XFlush(move_display);
 	}
-	XUngrabPointer(move_display,CurrentTime);
+
 
 OVER:
-    XCloseDisplay(move_display);
 #ifdef DEBUG
-	printf("move grab over\n\n\n");
+	if (getWindowName(move_display,win,name))
+		printf("move grab over : %s\n\n\n",name);
+	else
+		printf("move grab over\n\n\n");
 #endif
+	XUngrabPointer(move_display,CurrentTime);
+    XCloseDisplay(move_display);
 
 	pthread_mutex_unlock(&move_mutex);
 }
@@ -648,7 +700,7 @@ int main(int argc, char * argv[])
 	while(1)
 	{
 		usleep(1000*50);
-
+//		usleep(1000*20);
 		if (E5 && (display != NULL))
 		{
 			focus_window = 0x0;
@@ -666,13 +718,6 @@ int main(int argc, char * argv[])
 						focus_window = get_parent_win(display,focus_window);
 					}
 #endif
-					//Touch Device
-				    if (isExpectWindow(display,focus_window,touch_device_name))
-				    {
-				    	//Set the null cursor
-						change_cursor_shape(display,focus_window);
-						continue;
-				    }
 
 					XGetWindowAttributes(display,focus_window,&windowattribute);
 
@@ -691,6 +736,7 @@ int main(int argc, char * argv[])
 						printf("trans_coords null \n ");
 
 					//The window is in Main Screen
+					//if (isExpectWindow(display,focus_window,whitelist_window) && isExistWindow(focus_window))
 					if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
 					{
 						pre_window = focus_window;
@@ -715,6 +761,22 @@ int main(int argc, char * argv[])
 
 					if (trans_coords)
 						free(trans_coords);
+
+					//Touch Device
+				    if (isExpectWindow(display,focus_window,touch_device_name))
+				    {
+				    	//Set the null cursor
+						change_cursor_shape(display,focus_window);
+
+						if (isExpectWindow(display,activeWin,focus_window_name) && isExistWindow(activeWin))
+						{
+							char command[128];
+							sprintf(command,"xdotool windowfocus %d",(int)activeWin);
+							int result = system(command);
+						}
+
+						continue;
+				    }
 
 					//reset the focus
 					if ((activeWin != 0x0) && (windowattribute.width != 1920))
