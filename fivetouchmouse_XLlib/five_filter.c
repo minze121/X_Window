@@ -74,6 +74,7 @@ static xcb_generic_error_t *err;
 int ret_revert;
 
 #define DEBUG
+#define AddMoveControl
 
 pthread_mutex_t click_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t move_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -111,6 +112,11 @@ static char * whitelist_window[] =
 		"NULL"
 };
 
+static char * message_window[] =
+{
+		"Message",
+		"NULL"
+};
 static char * touch_device_name[] =
 {
 		"TouchScreenWnd",
@@ -126,14 +132,26 @@ static char * focus_window_name[] =
 		" ",
 		"E5App",
 		"Message",
+		"Preset",
 		"NULL"
 };
 
 static char * move_window_name[] =
 {
 		"E5App",
+		"Simulate front panel",
+		"Patient Information",
+		"Maintenance",
 		"Dialog",
 		"Preset",
+		"Form",
+		"WorkSheet",//Report
+		" ", //small Dialog
+		"Import exam path",
+		"Export exam path",
+		"Open Directory",
+		"Tools for Engineer",
+		"Print Preview",
 		"NULL"
 };
 
@@ -147,6 +165,7 @@ int isExistWindow(Window win)
 	if (!geometry) {
 		if (currentActiveWindowNumber > 0)
 		{
+
 			int i = 0;
 			for(i; i<currentActiveWindowNumber;i++)
 			{
@@ -157,7 +176,9 @@ int isExistWindow(Window win)
 					for (i;i<currentActiveWindowNumber;i++)
 						activeWinStack[i] = activeWinStack[i+1];
 
+
 					activeWin = activeWinStack[currentActiveWindowNumber-1];
+					printf("get Older Active window : 0x%x\n",(int)activeWin);
 					break;
 				}
 			}
@@ -433,8 +454,10 @@ void * create_move_thread(void * arg)
 	move_display = XOpenDisplay(NULL);
 	Window win = (Window)arg;
 
+#ifdef AddMoveControl
 	if (!isExpectWindow(move_display,win,move_window_name))
 		goto OVER;
+#endif
 
 	//judge whether the window exists.
 	if (!isExistWindow(win))
@@ -517,13 +540,14 @@ void * create_move_thread(void * arg)
 		XFlush(move_display);
 	}
 
-
+	static int i = 0;
 OVER:
 #ifdef DEBUG
+
 	if (getWindowName(move_display,win,name))
-		printf("move grab over : %s\n\n\n",name);
+		printf("%d  move grab over : %s\n\n\n",i++,name);
 	else
-		printf("move grab over\n\n\n");
+		printf("%d move grab over\n\n\n",i++);
 #endif
 	XUngrabPointer(move_display,CurrentTime);
     XCloseDisplay(move_display);
@@ -739,6 +763,7 @@ int main(int argc, char * argv[])
 					//if (isExpectWindow(display,focus_window,whitelist_window) && isExistWindow(focus_window))
 					if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
 					{
+
 						pre_window = focus_window;
 						activeWin = pre_window;
 						setFocusCount = 0;
@@ -767,15 +792,6 @@ int main(int argc, char * argv[])
 				    {
 				    	//Set the null cursor
 						change_cursor_shape(display,focus_window);
-
-						if (isExpectWindow(display,activeWin,focus_window_name) && isExistWindow(activeWin))
-						{
-							char command[128];
-							sprintf(command,"xdotool windowfocus %d",(int)activeWin);
-							int result = system(command);
-						}
-
-						continue;
 				    }
 
 					//reset the focus
@@ -790,6 +806,26 @@ int main(int argc, char * argv[])
 								char command[128];
 								sprintf(command,"xdotool windowfocus %d",(int)activeWin);
 								int result = system(command);
+								sprintf(command,"xdotool windowraise %d",(int)activeWin);
+								result = system(command);
+								sprintf(command,"xdotool windowactivate %d",(int)activeWin);
+								result = system(command);
+
+								//Handle the messagebox
+								if (isExpectWindow(display,activeWin,message_window))
+								{
+									while(isExpectWindow(display,activeWin,message_window))
+									{
+										printf("Messsage BOS\n");
+										sprintf(command,"xdotool windowfocus %d",(int)activeWin);
+										result = system(command);
+										sprintf(command,"xdotool windowraise %d",(int)activeWin);
+										result = system(command);
+										sprintf(command,"xdotool windowactivate %d",(int)activeWin);
+										result = system(command);
+										usleep(1000*100);
+									}
+								}
 							}
 						}
 					}
