@@ -126,13 +126,21 @@ static char * touch_device_name[] =
 
 static char * focus_window_name[] =
 {
-		"Patient Information",
-		"Form",
-		"Dialog",
-		" ",
 		"E5App",
-		"Message",
+		"Simulate front panel",
+		"Patient Information",
+		"Maintenance",
+		"Dialog",
 		"Preset",
+		"Form",
+		"WorkSheet",//Report
+		" ", //small Dialog
+		"Import exam path",
+		"Export exam path",
+		"Open Directory",
+		"Tools for Engineer",
+		"Print Preview",
+		"Message",
 		"NULL"
 };
 
@@ -284,6 +292,75 @@ int isExpectWindow(Display * display,Window win,char * windowList[])
 			}
 		}
 #endif
+	}
+	return 0;
+}
+
+int isEUPWindow(Display * display,Window win)
+{
+	if (isExistWindow(win))
+	{
+		//Get Window Attributes
+		Atom actual_type;
+		int actual_format;
+		unsigned long _nitems;
+		/*unsigned long nbytes;*/
+		unsigned long bytes_after; /* unused */
+
+		int status = 0;
+
+		Window nullWindow = win;
+
+		//WM_NAME
+		{
+			unsigned char *wm_name = NULL;
+
+			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "WM_NAME", False),
+					  0, (~0L),False,
+					  AnyPropertyType, &actual_type,&actual_format,
+					  &_nitems, &bytes_after,&wm_name);
+
+			if (status == BadWindow)
+			{
+				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+			}
+			if (status != Success)
+			{
+				fprintf(stderr, "XGetWindowProperty failed!");
+			}
+
+			if ((wm_name != NULL) && (strncmp("EUP",wm_name,3) == 0))
+			{
+				return 1;
+			}
+		}
+
+		//_NET_WM_NAME
+		{
+			unsigned char *wm_name = NULL;
+			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
+					  0, (~0L),False,
+					  AnyPropertyType, &actual_type,&actual_format,
+					  &_nitems, &bytes_after,&wm_name);
+
+			if (status == BadWindow)
+			{
+				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+			}
+			if (status != Success)
+			{
+				fprintf(stderr, "XGetWindowProperty failed!");
+			}
+
+			if ((wm_name != NULL) && (strncmp("EUP",wm_name,3) == 0))
+			{
+				return 1;
+			}
+		}
+	}
+	else
+	{
+		printf("EUP dont exist\n");
 	}
 	return 0;
 }
@@ -721,6 +798,9 @@ int main(int argc, char * argv[])
 #endif
 	int startNullCursorThreadFlag = 0;
 	int revertInputFocus = 0;
+	char command[128];
+	int result;
+
 	while(1)
 	{
 		usleep(1000*50);
@@ -759,11 +839,26 @@ int main(int argc, char * argv[])
 					if (trans_coords == NULL)
 						printf("trans_coords null \n ");
 
+					//EUP Window
+					if (isEUPWindow(display,focus_window))
+					{
+//						printf("EUP WINDOW\n");
+						//Get Focus and Raise the window.
+						while(isEUPWindow(display,focus_window))
+						{
+							sprintf(command,"xdotool windowfocus %d",(int)focus_window);
+							result = system(command);
+							sprintf(command,"xdotool windowraise %d",(int)focus_window);
+							result = system(command);
+							sprintf(command,"xdotool windowactivate %d",(int)focus_window);
+							result = system(command);
+							usleep(1000*100);
+						}
+					}
 					//The window is in Main Screen
 					//if (isExpectWindow(display,focus_window,whitelist_window) && isExistWindow(focus_window))
-					if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
+					else if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
 					{
-
 						pre_window = focus_window;
 						activeWin = pre_window;
 						setFocusCount = 0;
@@ -784,6 +879,8 @@ int main(int argc, char * argv[])
 						}
 					}
 
+
+
 					if (trans_coords)
 						free(trans_coords);
 
@@ -803,9 +900,8 @@ int main(int argc, char * argv[])
 						{
 							if (isExpectWindow(display,activeWin,focus_window_name) && isExistWindow(activeWin))
 							{
-								char command[128];
 								sprintf(command,"xdotool windowfocus %d",(int)activeWin);
-								int result = system(command);
+								result = system(command);
 								sprintf(command,"xdotool windowraise %d",(int)activeWin);
 								result = system(command);
 								sprintf(command,"xdotool windowactivate %d",(int)activeWin);
