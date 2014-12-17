@@ -51,6 +51,8 @@ int isMoveCursor = 0; //if accept multitouch event , don't move
 int clickWindowLiveFlag = 0;
 int moveWindowLiveFlag = 0;
 int E5 = 0;
+int isCanGrab = 1;
+
 Cursor null_cursor ;
 
 Display * click_display;
@@ -108,7 +110,6 @@ static char * whitelist_window[] =
 		"Open Directory",
 		"Tools for Engineer",
 		"Print Preview",
-		"Message",
 		"NULL"
 };
 
@@ -140,7 +141,6 @@ static char * focus_window_name[] =
 		"Open Directory",
 		"Tools for Engineer",
 		"Print Preview",
-		"Message",
 		"NULL"
 };
 
@@ -311,6 +311,30 @@ int isEUPWindow(Display * display,Window win)
 
 		Window nullWindow = win;
 
+		//_NET_WM_NAME
+		{
+			unsigned char *wm_name = NULL;
+			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
+					  0, (~0L),False,
+					  AnyPropertyType, &actual_type,&actual_format,
+					  &_nitems, &bytes_after,&wm_name);
+
+			if (status == BadWindow)
+			{
+				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
+			}
+			if (status != Success)
+			{
+				fprintf(stderr, "XGetWindowProperty failed!");
+			}
+
+			if ((wm_name != NULL) && (strncmp("EUP",wm_name,3) == 0))
+			{
+				printf("	2 _NET_WM_NAME success : %s\n",wm_name);
+				return 1;
+			}
+		}
+
 		//WM_NAME
 		{
 			unsigned char *wm_name = NULL;
@@ -331,29 +355,7 @@ int isEUPWindow(Display * display,Window win)
 
 			if ((wm_name != NULL) && (strncmp("EUP",wm_name,3) == 0))
 			{
-				return 1;
-			}
-		}
-
-		//_NET_WM_NAME
-		{
-			unsigned char *wm_name = NULL;
-			status = XGetWindowProperty(display,nullWindow,  XInternAtom(display, "_NET_WM_NAME", False),
-					  0, (~0L),False,
-					  AnyPropertyType, &actual_type,&actual_format,
-					  &_nitems, &bytes_after,&wm_name);
-
-			if (status == BadWindow)
-			{
-				fprintf(stderr, "window id # 0x%lx does not exists!", nullWindow);
-			}
-			if (status != Success)
-			{
-				fprintf(stderr, "XGetWindowProperty failed!");
-			}
-
-			if ((wm_name != NULL) && (strncmp("EUP",wm_name,3) == 0))
-			{
+				printf("	1 WM_NAME success : %s\n",wm_name);
 				return 1;
 			}
 		}
@@ -507,7 +509,7 @@ OVER:
 
 void handle_click_signal()
 {
-	if (activeWin != 0)
+	if ((activeWin != 0) && (isCanGrab == 1))
 	{
 #ifdef DEBUG
 		printf("click active win : 0x%x\n",(int)activeWin);
@@ -634,7 +636,7 @@ OVER:
 
 void handle_move_signal()
 {
-	if (activeWin != 0)
+	if ((activeWin != 0) && (isCanGrab == 1))
 	{
 #ifdef DEBUG
 		printf("move active win : 0x%x\n",(int)activeWin);
@@ -803,8 +805,8 @@ int main(int argc, char * argv[])
 
 	while(1)
 	{
-		usleep(1000*50);
-//		usleep(1000*20);
+//		usleep(1000*50);
+		usleep(1000*5);
 		if (E5 && (display != NULL))
 		{
 			focus_window = 0x0;
@@ -839,25 +841,10 @@ int main(int argc, char * argv[])
 					if (trans_coords == NULL)
 						printf("trans_coords null \n ");
 
-					//EUP Window
-					if (isEUPWindow(display,focus_window))
-					{
-//						printf("EUP WINDOW\n");
-						//Get Focus and Raise the window.
-						while(isEUPWindow(display,focus_window))
-						{
-							sprintf(command,"xdotool windowfocus %d",(int)focus_window);
-							result = system(command);
-							sprintf(command,"xdotool windowraise %d",(int)focus_window);
-							result = system(command);
-							sprintf(command,"xdotool windowactivate %d",(int)focus_window);
-							result = system(command);
-							usleep(1000*100);
-						}
-					}
+					isCanGrab = 1;
 					//The window is in Main Screen
-					//if (isExpectWindow(display,focus_window,whitelist_window) && isExistWindow(focus_window))
-					else if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
+//					if (isExpectWindow(display,focus_window,whitelist_window) && isExistWindow(focus_window))
+					if ((trans_coords) && (trans_coords->dst_x >= 1280) && (pre_window != focus_window) )
 					{
 						pre_window = focus_window;
 						activeWin = pre_window;
@@ -878,6 +865,47 @@ int main(int argc, char * argv[])
 							startNullCursorThreadFlag = 1;
 						}
 					}
+					//Handle EUP Window
+					else if (isEUPWindow(display,focus_window))
+					{
+						isCanGrab == 0;
+						//Set the null cursor
+						change_cursor_shape(display,focus_window);
+
+						//Get Focus and Raise the window.
+						while(isEUPWindow(display,focus_window))
+						{
+							isCanGrab == 0;
+//							sprintf(command,"xdotool windowfocus %d",(int)focus_window);
+//							result = system(command);
+//							sprintf(command,"xdotool windowraise %d",(int)focus_window);
+//							result = system(command);
+
+							sprintf(command,"xdotool windowactivate %d",(int)focus_window);
+							result = system(command);
+//							usleep(1000*100);
+						}
+						isCanGrab == 1;
+					}
+					//Handle the messagebox
+					else if (isExpectWindow(display,focus_window,message_window))
+					{
+						isCanGrab == 0;
+						while(isExpectWindow(display,focus_window,message_window))
+						{
+							isCanGrab == 0;
+							printf("Messsage BOS\n");
+//							sprintf(command,"xdotool windowfocus %d",(int)focus_window);
+//							result = system(command);
+//							sprintf(command,"xdotool windowraise %d",(int)focus_window);
+//							result = system(command);
+							sprintf(command,"xdotool windowactivate %d",(int)focus_window);
+							result = system(command);
+							usleep(1000*100);
+						}
+						isCanGrab == 1;
+					}
+
 
 
 
@@ -902,26 +930,10 @@ int main(int argc, char * argv[])
 							{
 								sprintf(command,"xdotool windowfocus %d",(int)activeWin);
 								result = system(command);
-								sprintf(command,"xdotool windowraise %d",(int)activeWin);
-								result = system(command);
-								sprintf(command,"xdotool windowactivate %d",(int)activeWin);
-								result = system(command);
-
-								//Handle the messagebox
-								if (isExpectWindow(display,activeWin,message_window))
-								{
-									while(isExpectWindow(display,activeWin,message_window))
-									{
-										printf("Messsage BOS\n");
-										sprintf(command,"xdotool windowfocus %d",(int)activeWin);
-										result = system(command);
-										sprintf(command,"xdotool windowraise %d",(int)activeWin);
-										result = system(command);
-										sprintf(command,"xdotool windowactivate %d",(int)activeWin);
-										result = system(command);
-										usleep(1000*100);
-									}
-								}
+//								sprintf(command,"xdotool windowraise %d",(int)activeWin);
+//								result = system(command);
+//								sprintf(command,"xdotool windowactivate %d",(int)activeWin);
+//								result = system(command);
 							}
 						}
 					}
